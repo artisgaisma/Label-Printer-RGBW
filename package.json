@@ -1,0 +1,46 @@
+{
+  "name": "label-printer",
+  "version": "1.0.0",
+  "description": "Small web-based label designer and PDF exporter.",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "desktop": "npm run build && electron electron/main.cjs",
+    "package:win": "npm run build && electron-builder --win portable",
+    "start": "node server/index.js",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@vitejs/plugin-react": "^6.0.3",
+    "express": "^5.2.1",
+    "jspdf": "^4.2.1",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "vite": "^8.1.4"
+  },
+  "devDependencies": {
+    "electron": "^43.1.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "local.label-printer",
+    "productName": "Label Printer",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable",
+      "artifactName": "Label-Printer.exe"
+    }
+  }
+}
