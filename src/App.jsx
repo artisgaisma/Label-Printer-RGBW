@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import GridPanel from './components/GridPanel';
 import LabelCanvas from './components/LabelCanvas';
 import ObjectListPanel from './components/ObjectListPanel';
 import PresetPicker from './components/PresetPicker';
 import PropertyPanel from './components/PropertyPanel';
+import SettingsPage from './components/SettingsPage';
 import TemplatePanel from './components/TemplatePanel';
 import Toolbar from './components/Toolbar';
-import { findPreset, loadPresets, savePreset } from './lib/labelPresets';
+import { findPreset, loadPresets, savePreset, savePresets } from './lib/labelPresets';
 import { clampObjectToLabel, createId, createObject, createTemplate } from './lib/labelModel';
 import {
   defaultLibraryName,
@@ -15,7 +17,7 @@ import {
   snapshotFromObject,
 } from './lib/objectLibraryStorage';
 import { convertImageToBlack } from './lib/imageUtils';
-import { exportTemplateToPdf, printTemplateToPdf } from './lib/pdfExport';
+import { exportTemplateToPdf, printTemplateToPdf, printTemplatesToPdf } from './lib/pdfExport';
 import {
   deleteTemplate,
   downloadTemplate,
@@ -31,6 +33,7 @@ export default function App() {
   const [templates, setTemplates] = useState(() => loadTemplates());
   const [presets, setPresets] = useState([]);
   const [savingPreset, setSavingPreset] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [copiedObject, setCopiedObject] = useState(null);
   const [libraryItems, setLibraryItems] = useState(() => loadLibrary());
   const selectedObject = useMemo(
@@ -86,6 +89,17 @@ export default function App() {
     setSelectedId(object.id);
   }
 
+  function addCounterObject() {
+    addObject('text', {
+      counterCount: '',
+      counterEnd: '',
+      counterStart: '1',
+      isCounter: true,
+      name: 'Auto counter',
+      text: '1',
+    });
+  }
+
   function handlePresetChange(id) {
     if (id === 'custom') {
       setTemplate((current) => ({ ...current, presetId: 'custom' }));
@@ -127,6 +141,38 @@ export default function App() {
     } catch (error) {
       console.error(error);
       window.alert('Unable to save preset. Make sure the dev server or production server is running.');
+    } finally {
+      setSavingPreset(false);
+    }
+  }
+
+  async function handleSavePresets(nextPresetList) {
+    setSavingPreset(true);
+
+    try {
+      const savedPresets = await savePresets(nextPresetList);
+      setPresets(savedPresets);
+
+      setTemplate((current) => {
+        const matchingPreset = savedPresets.find((item) => item.id === current.presetId);
+        if (!matchingPreset) {
+          return current;
+        }
+
+        const next = {
+          ...current,
+          widthMm: matchingPreset.widthMm,
+          heightMm: matchingPreset.heightMm,
+        };
+
+        return {
+          ...next,
+          objects: current.objects.map((object) => clampObjectToLabel(object, next)),
+        };
+      });
+    } catch (error) {
+      console.error(error);
+      window.alert('Unable to save presets. Make sure the dev server or production server is running.');
     } finally {
       setSavingPreset(false);
     }
@@ -318,7 +364,18 @@ export default function App() {
   }
 
   function handleSaveTemplate() {
-    setTemplates(saveTemplate(template));
+    const name = window.prompt('Label name', template.name || 'Untitled label')?.trim();
+    if (!name) {
+      return;
+    }
+
+    const namedTemplate = {
+      ...template,
+      name,
+    };
+
+    setTemplate(namedTemplate);
+    setTemplates(saveTemplate(namedTemplate));
   }
 
   function handleLoadTemplate(name) {
@@ -359,48 +416,103 @@ export default function App() {
     }
   }
 
+  async function handlePrintAutoCounter(options) {
+    const sequence = buildCounterSequence(options);
+    if (!sequence.length) {
+      window.alert('Enter a valid start/end range or a count greater than 0.');
+      return;
+    }
+
+    const counterTextObjects = template.objects.filter((object) => object.type === 'text' && object.isCounter);
+    if (!counterTextObjects.length) {
+      window.alert('Add an Auto Counter object first, or mark a text object as Auto counter.');
+      return;
+    }
+
+    const templatesToPrint = sequence.map((value) => ({
+      ...template,
+      objects: template.objects.map((object) =>
+        object.type === 'text' && object.isCounter ? { ...object, text: value } : object,
+      ),
+    }));
+
+    await printTemplatesToPdf(templatesToPrint);
+  }
+
   return (
     <main className="app">
       <header className="app-header">
-        <div>
-          <p className="eyebrow">Web Server Label Printer</p>
-          <h1>Label Printer</h1>
-        </div>
-      </header>
-
-      <div className="workspace">
-        <aside className="sidebar">
+        <div className="header-main">
+          <div>
+            <h1>Label Printer</h1>
+          </div>
           <PresetPicker
             presets={presets}
             savingPreset={savingPreset}
             template={template}
-            onCustomSizeChange={handleCustomSizeChange}
             onPresetChange={handlePresetChange}
             onSavePreset={handleSavePreset}
+            onSavePresets={handleSavePresets}
           />
+          <TemplatePanel
+            templates={templates}
+            onDelete={handleDeleteTemplate}
+            onDownloadJson={() => downloadTemplate(template)}
+            onImportJson={handleImportTemplate}
+            onLoad={handleLoadTemplate}
+            onSave={handleSaveTemplate}
+          />
+        </div>
+        <div className="header-actions">
+          <button className="primary" type="button" onClick={() => exportTemplateToPdf(template)}>
+            PDF
+          </button>
+          <button type="button" onClick={() => printTemplateToPdf(template)}>
+            Print
+          </button>
+          <button
+            aria-label="Open settings"
+            className="icon-button"
+            title="Settings"
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <GearIcon />
+          </button>
+        </div>
+      </header>
+
+      {settingsOpen && (
+        <SettingsPage
+          template={template}
+          onClose={() => setSettingsOpen(false)}
+          onTemplateChange={updateTemplate}
+        />
+      )}
+
+      <div className="workspace">
+        <aside className="sidebar">
           <Toolbar
             libraryItems={libraryItems}
             selectedObject={selectedObject}
+            onAddCounter={addCounterObject}
             onAddEllipse={() => addObject('ellipse')}
             onAddFromLibrary={handleAddFromLibrary}
             onAddLine={() => addObject('line')}
+            onAddQr={() => addObject('qr')}
             onAddRect={() => addObject('rect')}
             onAddText={() => addObject('text', { text: 'New text' })}
             onDeleteLibraryItem={handleDeleteLibraryItem}
             onImageUpload={handleImageUpload}
             onSaveToLibrary={handleSaveToLibrary}
           />
-          <TemplatePanel
-            template={template}
-            templates={templates}
-            onDelete={handleDeleteTemplate}
-            onDownloadJson={() => downloadTemplate(template)}
-            onExportPdf={() => exportTemplateToPdf(template)}
-            onPrint={() => printTemplateToPdf(template)}
-            onImportJson={handleImportTemplate}
-            onLoad={handleLoadTemplate}
-            onSave={handleSaveTemplate}
-            onTemplateChange={updateTemplate}
+          <ObjectListPanel
+            objects={template.objects}
+            selectedId={selectedId}
+            onDeleteObject={deleteObject}
+            onMoveLayer={moveObjectLayer}
+            onSelect={setSelectedId}
+            onToggleLock={toggleObjectLock}
           />
         </aside>
 
@@ -413,22 +525,14 @@ export default function App() {
           />
         </section>
 
-        <aside className="sidebar">
-          <ObjectListPanel
-            objects={template.objects}
-            selectedId={selectedId}
-            onDeleteObject={deleteObject}
-            onMoveLayer={moveObjectLayer}
-            onSelect={setSelectedId}
-            onToggleLock={toggleObjectLock}
-          />
+        <aside className="sidebar inspector-sidebar">
+          <GridPanel template={template} onTemplateChange={updateTemplate} />
           <PropertyPanel
             object={selectedObject}
-            template={template}
             onMakeImageBlack={handleMakeImageBlack}
             onMoveLayer={moveLayer}
             onObjectChange={updateSelectedObject}
-            onTemplateChange={updateTemplate}
+            onPrintAutoCounter={handlePrintAutoCounter}
           />
         </aside>
       </div>
@@ -446,4 +550,64 @@ function isFormField(target) {
   }
 
   return Boolean(target.closest('input, textarea, select, [contenteditable="true"]'));
+}
+
+function buildCounterSequence({ startNumber, endNumber, count }) {
+  const start = parseInteger(startNumber);
+  const end = parseInteger(endNumber);
+  const requestedCount = parseInteger(count);
+
+  if (!Number.isFinite(start)) {
+    return [];
+  }
+
+  const padWidth = Math.max(getIntegerWidth(startNumber), getIntegerWidth(endNumber));
+  const values = [];
+
+  if (Number.isFinite(end)) {
+    const step = end >= start ? 1 : -1;
+    for (let value = start; step > 0 ? value <= end : value >= end; value += step) {
+      values.push(formatCounterValue(value, padWidth));
+    }
+    return values;
+  }
+
+  if (!Number.isFinite(requestedCount) || requestedCount < 1) {
+    return [];
+  }
+
+  for (let index = 0; index < requestedCount; index += 1) {
+    values.push(formatCounterValue(start + index, padWidth));
+  }
+
+  return values;
+}
+
+function parseInteger(value) {
+  if (value === '' || value === null || value === undefined) {
+    return NaN;
+  }
+
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function getIntegerWidth(value) {
+  const match = String(value ?? '').match(/\d+/);
+  return match ? match[0].length : 0;
+}
+
+function formatCounterValue(value, padWidth) {
+  const sign = value < 0 ? '-' : '';
+  const digits = String(Math.abs(value)).padStart(padWidth, '0');
+  return `${sign}${digits}`;
+}
+
+function GearIcon() {
+  return (
+    <svg aria-hidden="true" className="button-icon" viewBox="0 0 24 24">
+      <path d="M12 8.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" />
+      <path d="M19.4 15a8 8 0 0 0 .1-1.1 8 8 0 0 0-.1-1.1l2-1.5-2-3.5-2.4 1a7.8 7.8 0 0 0-1.9-1.1L14.8 5h-4l-.4 2.7a7.8 7.8 0 0 0-1.9 1.1l-2.4-1-2 3.5 2 1.5A8 8 0 0 0 6 13.9 8 8 0 0 0 6.1 15l-2 1.5 2 3.5 2.4-1a7.8 7.8 0 0 0 1.9 1.1l.4 2.7h4l.4-2.7a7.8 7.8 0 0 0 1.9-1.1l2.4 1 2-3.5-2.1-1.5Z" />
+    </svg>
+  );
 }

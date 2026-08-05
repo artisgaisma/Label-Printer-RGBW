@@ -1,13 +1,18 @@
-import { useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getFontCssFamily } from '../lib/fontLibrary';
-import { defaultGridSizeMm, normalizeGridSizeMm, snapPositionToGrid } from '../lib/gridUtils';
+import { defaultGridSizeMm, normalizeGridSizeMm, snapPositionToGrid, snapValueToGrid } from '../lib/gridUtils';
+import { createQrMatrix } from '../lib/qrCode';
 
 const maxCanvasWidth = 760;
 const maxCanvasHeight = 420;
+const doubleClickDistancePx = 8;
+const doubleClickMs = 450;
 
 export default function LabelCanvas({ template, selectedId, onSelect, onObjectChange }) {
   const canvasRef = useRef(null);
   const dragStateRef = useRef(null);
+  const lastTextClickRef = useRef(null);
+  const [editingTextId, setEditingTextId] = useState(null);
 
   function setDragState(state) {
     dragStateRef.current = state;
@@ -36,6 +41,11 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
   }
 
   function startMove(event, object) {
+    if (object.type === 'text' && isTextDoubleClick(event, object)) {
+      startTextEdit(event, object);
+      return;
+    }
+
     event.stopPropagation();
     event.preventDefault();
     onSelect(object.id);
@@ -69,6 +79,36 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
     });
   }
 
+  function startTextEdit(event, object) {
+    event.stopPropagation();
+    event.preventDefault();
+    onSelect(object.id);
+    endDrag(event);
+    lastTextClickRef.current = null;
+    setEditingTextId(object.id);
+  }
+
+  function isTextDoubleClick(event, object) {
+    const now = window.performance.now();
+    const lastClick = lastTextClickRef.current;
+    lastTextClickRef.current = {
+      id: object.id,
+      time: now,
+      x: event.clientX,
+      y: event.clientY,
+    };
+
+    if (!lastClick || lastClick.id !== object.id) {
+      return false;
+    }
+
+    return (
+      now - lastClick.time <= doubleClickMs &&
+      Math.abs(event.clientX - lastClick.x) <= doubleClickDistancePx &&
+      Math.abs(event.clientY - lastClick.y) <= doubleClickDistancePx
+    );
+  }
+
   function handlePointerMove(event) {
     const drag = dragStateRef.current;
     if (!drag) {
@@ -88,9 +128,17 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
       return;
     }
 
+    let width = point.x - drag.object.x;
+    let height = point.y - drag.object.y;
+
+    if (template.snapToGrid) {
+      width = snapValueToGrid(width, gridSizeMm);
+      height = snapValueToGrid(height, gridSizeMm);
+    }
+
     onObjectChange(drag.object.id, {
-      width: Math.max(1, point.x - drag.object.x),
-      height: Math.max(1, point.y - drag.object.y),
+      width: Math.max(template.snapToGrid ? gridSizeMm : 1, width),
+      height: Math.max(template.snapToGrid ? gridSizeMm : 1, height),
     });
   }
 
@@ -102,17 +150,21 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
       <div
         ref={canvasRef}
         className="label-canvas"
+        data-document-theme={template.documentThemeId || 'white'}
         role="button"
         tabIndex={0}
         style={{
           width: `${template.widthMm * scale}px`,
           height: `${template.heightMm * scale}px`,
-          background: template.background,
+          backgroundColor: template.background,
         }}
         onPointerMove={handlePointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
-        onPointerDown={() => onSelect(null)}
+        onPointerDown={() => {
+          onSelect(null);
+          setEditingTextId(null);
+        }}
       >
         {template.showGrid && (
           <div
@@ -129,8 +181,11 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
             object={object}
             scale={scale}
             selected={selectedId === object.id}
+            editing={editingTextId === object.id}
             onMoveStart={startMove}
+            onObjectChange={onObjectChange}
             onResizeStart={startResize}
+            onTextEditEnd={() => setEditingTextId(null)}
           />
         ))}
       </div>
@@ -138,7 +193,16 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
   );
 }
 
-function LabelObject({ object, scale, selected, onMoveStart, onResizeStart }) {
+function LabelObject({
+  object,
+  scale,
+  selected,
+  editing,
+  onMoveStart,
+  onObjectChange,
+  onResizeStart,
+  onTextEditEnd,
+}) {
   const lineContainerHeight = getLineContainerHeight(object);
   const commonStyle = {
     left: `${object.x * scale}px`,
@@ -153,7 +217,7 @@ function LabelObject({ object, scale, selected, onMoveStart, onResizeStart }) {
       style={commonStyle}
       onPointerDown={(event) => onMoveStart(event, object)}
     >
-      {object.type === 'text' && (
+      {object.type === 'text' && !editing && (
         <div
           className="text-object"
           style={{
@@ -165,10 +229,19 @@ function LabelObject({ object, scale, selected, onMoveStart, onResizeStart }) {
             textDecoration: object.textDecoration || 'none',
             letterSpacing: `${(object.letterSpacing || 0) * scale}px`,
             textAlign: object.textAlign,
+            justifyContent: getTextJustifyContent(object.textAlign),
           }}
         >
           {object.text}
         </div>
+      )}
+      {object.type === 'text' && editing && (
+        <InlineTextEditor
+          object={object}
+          scale={scale}
+          onChange={(text) => onObjectChange(object.id, { text })}
+          onDone={onTextEditEnd}
+        />
       )}
       {object.type === 'rect' && <RectObject object={object} scale={scale} />}
       {object.type === 'ellipse' && <EllipseObject object={object} scale={scale} />}
@@ -176,6 +249,7 @@ function LabelObject({ object, scale, selected, onMoveStart, onResizeStart }) {
       {object.type === 'image' && (
         <img alt={object.name} className="image-object" draggable={false} src={object.src} />
       )}
+      {object.type === 'qr' && <QrObject object={object} />}
       {selected && !object.locked && object.type !== 'line' && (
         <button
           aria-label="Resize object"
@@ -185,6 +259,75 @@ function LabelObject({ object, scale, selected, onMoveStart, onResizeStart }) {
         />
       )}
     </div>
+  );
+}
+
+function QrObject({ object }) {
+  const matrix = createQrMatrix(object);
+
+  if (!matrix) {
+    return <div className="qr-code-placeholder">QR</div>;
+  }
+
+  const quietZone = 1;
+  const viewBoxSize = matrix.size + quietZone * 2;
+
+  return (
+    <svg aria-label={object.name || 'QR code'} className="qr-code-object" role="img" viewBox={`0 0 ${viewBoxSize} ${viewBoxSize}`}>
+      <rect fill="#ffffff" height={viewBoxSize} width={viewBoxSize} />
+      {matrix.data.map((filled, index) => {
+        if (!filled) {
+          return null;
+        }
+
+        const x = (index % matrix.size) + quietZone;
+        const y = Math.floor(index / matrix.size) + quietZone;
+
+        return <rect key={index} fill="#000000" height="1" width="1" x={x} y={y} />;
+      })}
+    </svg>
+  );
+}
+
+function InlineTextEditor({ object, scale, onChange, onDone }) {
+  const editorRef = useRef(null);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) {
+      return;
+    }
+
+    editor.focus();
+    editor.select();
+  }, []);
+
+  return (
+    <textarea
+      ref={editorRef}
+      className="text-object-editor"
+      spellCheck={false}
+      value={object.text}
+      style={{
+        color: object.color,
+        fontFamily: getFontCssFamily(object.fontFamily),
+        fontSize: `${object.fontSize * scale}px`,
+        fontWeight: object.fontWeight,
+        fontStyle: object.fontStyle || 'normal',
+        textDecoration: object.textDecoration || 'none',
+        letterSpacing: `${(object.letterSpacing || 0) * scale}px`,
+        textAlign: object.textAlign,
+      }}
+      onBlur={onDone}
+      onChange={(event) => onChange(event.target.value)}
+      onDoubleClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          event.currentTarget.blur();
+        }
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+    />
   );
 }
 
@@ -412,6 +555,18 @@ function getLineContainerHeight(object) {
   }
 
   return Math.max(Math.abs(object.height), strokeWidth);
+}
+
+function getTextJustifyContent(textAlign) {
+  if (textAlign === 'center') {
+    return 'center';
+  }
+
+  if (textAlign === 'right') {
+    return 'flex-end';
+  }
+
+  return 'flex-start';
 }
 
 function getLineDashArray(lineStyle, strokeWidth) {

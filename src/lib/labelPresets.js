@@ -31,6 +31,22 @@ export async function savePreset(preset) {
   return response.json();
 }
 
+export async function savePresets(presets) {
+  const response = await fetch('/api/presets', {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(presets),
+  });
+
+  if (!response.ok) {
+    throw new Error('Unable to save label presets.');
+  }
+
+  return response.json();
+}
+
 export function findPreset(presets, id) {
   return presets.find((preset) => preset.id === id) || null;
 }

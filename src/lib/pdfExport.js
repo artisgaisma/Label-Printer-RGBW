@@ -1,14 +1,57 @@
 import { jsPDF } from 'jspdf';
 import { getPdfFontFamily } from './fontLibrary';
+import { qrToDataUrl } from './qrCode';
+
+const textLineHeightFactor = 1.05;
 
 export async function buildTemplatePdf(template) {
-  const orientation = template.widthMm >= template.heightMm ? 'landscape' : 'portrait';
-  const pdf = new jsPDF({
-    orientation,
+  const pdf = createPdfForTemplate(template);
+  await drawTemplatePage(pdf, template);
+
+  return pdf;
+}
+
+export async function buildTemplatesPdf(templates) {
+  if (!templates.length) {
+    throw new Error('At least one template is required.');
+  }
+
+  const [firstTemplate, ...remainingTemplates] = templates;
+  const pdf = createPdfForTemplate(firstTemplate);
+  await drawTemplatePage(pdf, firstTemplate);
+
+  for (const template of remainingTemplates) {
+    pdf.addPage([template.widthMm, template.heightMm], getPdfOrientation(template));
+    await drawTemplatePage(pdf, template);
+  }
+
+  return pdf;
+}
+
+export async function exportTemplateToPdf(template) {
+  const pdf = await buildTemplatePdf(template);
+  pdf.save(`${fileSafe(template.name || 'label')}.pdf`);
+}
+
+export async function printTemplateToPdf(template) {
+  const pdf = await buildTemplatePdf(template);
+  printPdf(pdf);
+}
+
+export async function printTemplatesToPdf(templates) {
+  const pdf = await buildTemplatesPdf(templates);
+  printPdf(pdf);
+}
+
+function createPdfForTemplate(template) {
+  return new jsPDF({
+    orientation: getPdfOrientation(template),
     unit: 'mm',
     format: [template.widthMm, template.heightMm],
   });
+}
 
+async function drawTemplatePage(pdf, template) {
   pdf.setFillColor(template.background || '#ffffff');
   pdf.rect(0, 0, template.widthMm, template.heightMm, 'F');
 
@@ -32,18 +75,18 @@ export async function buildTemplatePdf(template) {
     if (object.type === 'image' && object.src) {
       await drawImage(pdf, object);
     }
+
+    if (object.type === 'qr') {
+      await drawQrCode(pdf, object);
+    }
   }
-
-  return pdf;
 }
 
-export async function exportTemplateToPdf(template) {
-  const pdf = await buildTemplatePdf(template);
-  pdf.save(`${fileSafe(template.name || 'label')}.pdf`);
+function getPdfOrientation(template) {
+  return template.widthMm >= template.heightMm ? 'landscape' : 'portrait';
 }
 
-export async function printTemplateToPdf(template) {
-  const pdf = await buildTemplatePdf(template);
+function printPdf(pdf) {
   const url = URL.createObjectURL(pdf.output('blob'));
 
   const iframe = document.createElement('iframe');
@@ -80,13 +123,15 @@ function drawText(pdf, object) {
 
   const text = object.text || '';
   const lines = pdf.splitTextToSize(text, object.width);
-  const lineHeight = object.fontSize * 1.15;
+  const lineHeight = object.fontSize * textLineHeightFactor;
+  const textBlockHeight = Math.max(lines.length, 1) * lineHeight;
   const x = object.x + textOffset(object);
-  const y = object.y + object.fontSize;
+  const y = object.y + Math.max((object.height - textBlockHeight) / 2, 0) + object.fontSize;
 
   pdf.text(lines, x, y, {
     align: object.textAlign || 'left',
     charSpace: object.letterSpacing || 0,
+    lineHeightFactor: textLineHeightFactor,
     maxWidth: object.width,
   });
 
@@ -295,6 +340,15 @@ function getPdfDashPattern(lineStyle, strokeWidth) {
 
 async function drawImage(pdf, object) {
   const pngSrc = await toPngDataUrl(object.src);
+  pdf.addImage(pngSrc, 'PNG', object.x, object.y, object.width, object.height, undefined, 'FAST');
+}
+
+async function drawQrCode(pdf, object) {
+  const pngSrc = await qrToDataUrl(object);
+  if (!pngSrc) {
+    return;
+  }
+
   pdf.addImage(pngSrc, 'PNG', object.x, object.y, object.width, object.height, undefined, 'FAST');
 }
 

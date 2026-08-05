@@ -52,11 +52,17 @@ export function defaultLibraryName(snapshot) {
     ellipse: 'Circle',
     line: 'Line',
     image: snapshot.name || 'Image',
+    qr: 'QR Code',
   };
 
   const label = typeLabels[snapshot.type] || snapshot.type;
   if (snapshot.type === 'text') {
     const preview = (snapshot.text || 'Text').slice(0, 24);
+    return preview;
+  }
+
+  if (snapshot.type === 'qr') {
+    const preview = (snapshot.text || 'QR code').slice(0, 24);
     return preview;
   }
 

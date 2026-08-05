@@ -1,74 +1,49 @@
 import { useState } from 'react';
 import { defaultFontFamily, fontLibrary } from '../lib/fontLibrary';
-import { defaultGridSizeMm, normalizeGridSizeMm } from '../lib/gridUtils';
 import { lineStyleOptions } from '../lib/objectLibraryStorage';
+import { qrErrorCorrectionLevels } from '../lib/qrCode';
 
 export default function PropertyPanel({
-  template,
   object,
-  onTemplateChange,
   onObjectChange,
   onMoveLayer,
   onMakeImageBlack,
+  onPrintAutoCounter,
 }) {
   const [convertingImage, setConvertingImage] = useState(false);
-  const gridSizeMm = normalizeGridSizeMm(template.gridSizeMm ?? defaultGridSizeMm);
+  const [isExpanded, setIsExpanded] = useState(true);
 
   return (
-    <section className="panel properties">
-      <h2>Properties</h2>
-      <label>
-        Background
-        <input type="color" value={template.background} onChange={(event) => onTemplateChange({ background: event.target.value })} />
-      </label>
-      <div className="grid-controls">
-        <div className="grid-checkboxes">
-          <label className="checkbox-row">
-            <input
-              checked={Boolean(template.showGrid)}
-              type="checkbox"
-              onChange={(event) => onTemplateChange({ showGrid: event.target.checked })}
-            />
-            Show grid
-          </label>
-          <label className="checkbox-row">
-            <input
-              checked={Boolean(template.snapToGrid)}
-              type="checkbox"
-              onChange={(event) => onTemplateChange({ snapToGrid: event.target.checked })}
-            />
-            Snap to grid
-          </label>
-        </div>
-        <label className="grid-size-field">
-          Grid mm
-          <input
-            max="20"
-            min="1"
-            step="1"
-            type="number"
-            value={gridSizeMm}
-            onChange={(event) =>
-              onTemplateChange({ gridSizeMm: normalizeGridSizeMm(event.target.value) })
-            }
-          />
-        </label>
-      </div>
+    <section className={`panel panel-collapsible properties ${isExpanded ? 'is-expanded' : ''}`}>
+      <button
+        aria-expanded={isExpanded}
+        className="panel-toggle"
+        type="button"
+        onClick={() => setIsExpanded((current) => !current)}
+      >
+        <h2>Properties</h2>
+        <span className="panel-toggle-hint">{object ? object.name || object.type : 'No selection'}</span>
+        <span className="panel-toggle-chevron" aria-hidden="true">
+          {isExpanded ? '-' : '+'}
+        </span>
+      </button>
 
-      {!object && <p className="muted">Select an object to edit its position, size, and style.</p>}
+      {isExpanded && (
+        <div className="property-panel-body">
+          {!object && <p className="muted">Select an object to edit its position, size, and style.</p>}
 
-      {object && (
-        <>
-          <div className="input-row">
-            <NumberField disabled={object.locked} label="X mm" value={object.x} onChange={(value) => onObjectChange({ x: value })} />
-            <NumberField disabled={object.locked} label="Y mm" value={object.y} onChange={(value) => onObjectChange({ y: value })} />
-          </div>
-          <div className="input-row">
-            <NumberField disabled={object.locked} label="W mm" value={object.width} onChange={(value) => onObjectChange({ width: value })} />
-            {object.type !== 'line' && (
-              <NumberField disabled={object.locked} label="H mm" value={object.height} onChange={(value) => onObjectChange({ height: value })} />
-            )}
-          </div>
+          {object && (
+            <>
+              <div className="input-row">
+                <NumberField disabled={object.locked} label="X mm" value={object.x} onChange={(value) => onObjectChange({ x: value })} />
+                <NumberField disabled={object.locked} label="Y mm" value={object.y} onChange={(value) => onObjectChange({ y: value })} />
+              </div>
+              <div className="input-row">
+                <NumberField disabled={object.locked} label="W mm" value={object.width} onChange={(value) => onObjectChange({ width: value })} />
+                {object.type !== 'line' && (
+                  <NumberField disabled={object.locked} label="H mm" value={object.height} onChange={(value) => onObjectChange({ height: value })} />
+                )}
+              </div>
 
           {object.type === 'text' && (
             <>
@@ -76,6 +51,53 @@ export default function PropertyPanel({
                 Text
                 <textarea rows="3" value={object.text} onChange={(event) => onObjectChange({ text: event.target.value })} />
               </label>
+              {object.isCounter && (
+                <div className="auto-counter-section">
+                  <h3>Auto Counter</h3>
+                  <p className="hint">Prints this label once for each number using the current page format.</p>
+                  <div className="input-row">
+                    <label>
+                      Start number
+                      <input
+                        inputMode="numeric"
+                        value={object.counterStart ?? object.text ?? '1'}
+                        onChange={(event) => onObjectChange({ counterStart: event.target.value })}
+                      />
+                    </label>
+                    <label>
+                      End number
+                      <input
+                        inputMode="numeric"
+                        placeholder="Optional"
+                        value={object.counterEnd ?? ''}
+                        onChange={(event) => onObjectChange({ counterEnd: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    Count
+                    <input
+                      inputMode="numeric"
+                      placeholder="Used when end is empty"
+                      value={object.counterCount ?? ''}
+                      onChange={(event) => onObjectChange({ counterCount: event.target.value })}
+                    />
+                  </label>
+                  <button
+                    className="primary"
+                    type="button"
+                    onClick={() =>
+                      onPrintAutoCounter({
+                        startNumber: object.counterStart ?? object.text ?? '1',
+                        endNumber: object.counterEnd ?? '',
+                        count: object.counterCount ?? '',
+                      })
+                    }
+                  >
+                    Print Auto Counter
+                  </button>
+                </div>
+              )}
               <label>
                 Font
                 <select value={object.fontFamily || defaultFontFamily} onChange={(event) => onObjectChange({ fontFamily: event.target.value })}>
@@ -221,6 +243,29 @@ export default function PropertyPanel({
             </>
           )}
 
+          {object.type === 'qr' && (
+            <>
+              <label>
+                QR code info
+                <textarea rows="4" value={object.text || ''} onChange={(event) => onObjectChange({ text: event.target.value })} />
+              </label>
+              <label>
+                Error correction
+                <select
+                  value={object.errorCorrectionLevel || 'M'}
+                  onChange={(event) => onObjectChange({ errorCorrectionLevel: event.target.value })}
+                >
+                  {qrErrorCorrectionLevels.map((level) => (
+                    <option key={level.value} value={level.value}>
+                      {level.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="hint">The QR code updates on the label as you edit this text.</p>
+            </>
+          )}
+
           <div className="button-row">
             <button type="button" onClick={() => onMoveLayer(-1)}>
               Send Back
@@ -229,7 +274,9 @@ export default function PropertyPanel({
               Bring Front
             </button>
           </div>
-        </>
+            </>
+          )}
+        </div>
       )}
     </section>
   );

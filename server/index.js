@@ -37,6 +37,22 @@ app.post('/api/presets', async (req, res, next) => {
   }
 });
 
+app.put('/api/presets', async (req, res, next) => {
+  try {
+    if (!Array.isArray(req.body)) {
+      res.status(400).json({ error: 'Preset list is required.' });
+      return;
+    }
+
+    const nextPresets = req.body.map(normalizePreset);
+
+    await writePresets(nextPresets);
+    res.json(nextPresets);
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use(express.static(distPath));
 
 app.get('/health', (_req, res) => {
