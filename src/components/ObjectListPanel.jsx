@@ -84,8 +84,9 @@ export default function ObjectListPanel({
                       title={object.locked ? 'Unlock position' : 'Lock position'}
                       type="button"
                       onClick={(event) => {
+                        event.preventDefault();
                         event.stopPropagation();
-                        onToggleLock(object.id);
+                        onToggleLock(object.id, !object.locked);
                       }}
                     >
                       {object.locked ? '🔒' : '🔓'}

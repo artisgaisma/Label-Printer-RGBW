@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getFontCssFamily } from '../lib/fontLibrary';
 import { defaultGridSizeMm, normalizeGridSizeMm, snapPositionToGrid, snapValueToGrid } from '../lib/gridUtils';
+import { getObjectAngle, getTemplateMargins } from '../lib/labelModel';
 import { createQrMatrix } from '../lib/qrCode';
 
 const maxCanvasWidth = 760;
@@ -8,7 +9,14 @@ const maxCanvasHeight = 420;
 const doubleClickDistancePx = 8;
 const doubleClickMs = 450;
 
-export default function LabelCanvas({ template, selectedId, onSelect, onObjectChange }) {
+export default function LabelCanvas({
+  template,
+  selectedId,
+  onSelect,
+  onObjectChange,
+  onHistoryGestureStart,
+  onHistoryGestureEnd,
+}) {
   const canvasRef = useRef(null);
   const dragStateRef = useRef(null);
   const lastTextClickRef = useRef(null);
@@ -22,6 +30,11 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
     if (event && canvasRef.current?.hasPointerCapture(event.pointerId)) {
       canvasRef.current.releasePointerCapture(event.pointerId);
     }
+
+    if (dragStateRef.current) {
+      onHistoryGestureEnd?.();
+    }
+
     setDragState(null);
   }
 
@@ -31,6 +44,8 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
 
   const gridSizeMm = normalizeGridSizeMm(template.gridSizeMm ?? defaultGridSizeMm);
   const gridSizePx = gridSizeMm * scale;
+  const margins = getTemplateMargins(template);
+  const showMargins = margins.left > 0 || margins.right > 0 || margins.top > 0 || margins.bottom > 0;
 
   function pointerToMm(event) {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -38,6 +53,12 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
       x: (event.clientX - rect.left) / scale,
       y: (event.clientY - rect.top) / scale,
     };
+  }
+
+  function isObjectLocked(objectOrId) {
+    const id = typeof objectOrId === 'string' ? objectOrId : objectOrId?.id;
+    const current = template.objects.find((item) => item.id === id);
+    return Boolean(current?.locked ?? objectOrId?.locked);
   }
 
   function startMove(event, object) {
@@ -50,9 +71,11 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
     event.preventDefault();
     onSelect(object.id);
 
-    if (object.locked) {
+    if (isObjectLocked(object)) {
       return;
     }
+
+    onHistoryGestureStart?.();
     canvasRef.current?.setPointerCapture(event.pointerId);
     const point = pointerToMm(event);
     setDragState({
@@ -68,14 +91,33 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
     event.preventDefault();
     onSelect(object.id);
 
-    if (object.locked) {
+    if (isObjectLocked(object)) {
       return;
     }
+
+    onHistoryGestureStart?.();
     canvasRef.current?.setPointerCapture(event.pointerId);
     setDragState({
       mode: 'resize',
       object,
       start: pointerToMm(event),
+    });
+  }
+
+  function startRotate(event, object) {
+    event.stopPropagation();
+    event.preventDefault();
+    onSelect(object.id);
+
+    if (isObjectLocked(object)) {
+      return;
+    }
+
+    onHistoryGestureStart?.();
+    canvasRef.current?.setPointerCapture(event.pointerId);
+    setDragState({
+      mode: 'rotate',
+      object,
     });
   }
 
@@ -85,6 +127,7 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
     onSelect(object.id);
     endDrag(event);
     lastTextClickRef.current = null;
+    onHistoryGestureStart?.();
     setEditingTextId(object.id);
   }
 
@@ -115,6 +158,11 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
       return;
     }
 
+    if (isObjectLocked(drag.object.id)) {
+      endDrag(event);
+      return;
+    }
+
     const point = pointerToMm(event);
     if (drag.mode === 'move') {
       let x = point.x - drag.offsetX;
@@ -128,17 +176,50 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
       return;
     }
 
-    let width = point.x - drag.object.x;
-    let height = point.y - drag.object.y;
+    if (drag.mode === 'rotate') {
+      const center = getObjectCenterMm(drag.object);
+      let angle = (Math.atan2(point.y - center.y, point.x - center.x) * 180) / Math.PI + 90;
+      if (event.shiftKey) {
+        angle = Math.round(angle / 15) * 15;
+      }
+      onObjectChange(drag.object.id, { angle });
+      return;
+    }
+
+    const angle = getObjectAngle(drag.object);
+    const center = getObjectCenterMm(drag.object);
+    const localPoint = angle
+      ? rotatePointAround(point.x, point.y, center.x, center.y, -angle)
+      : point;
+
+    let width = localPoint.x - drag.object.x;
+    let height = localPoint.y - drag.object.y;
 
     if (template.snapToGrid) {
       width = snapValueToGrid(width, gridSizeMm);
       height = snapValueToGrid(height, gridSizeMm);
     }
 
+    width = Math.max(template.snapToGrid ? gridSizeMm : 1, width);
+    height = Math.max(template.snapToGrid ? gridSizeMm : 1, height);
+
+    if (!angle) {
+      onObjectChange(drag.object.id, { width, height });
+      return;
+    }
+
+    const nwWorld = rotatePointAround(drag.object.x, drag.object.y, center.x, center.y, angle);
+    const halfOffset = rotatePointAround(width / 2, height / 2, 0, 0, angle);
+    const nextCenter = {
+      x: nwWorld.x + halfOffset.x,
+      y: nwWorld.y + halfOffset.y,
+    };
+
     onObjectChange(drag.object.id, {
-      width: Math.max(template.snapToGrid ? gridSizeMm : 1, width),
-      height: Math.max(template.snapToGrid ? gridSizeMm : 1, height),
+      x: nextCenter.x - width / 2,
+      y: nextCenter.y - height / 2,
+      width,
+      height,
     });
   }
 
@@ -163,7 +244,10 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
         onPointerCancel={endDrag}
         onPointerDown={() => {
           onSelect(null);
-          setEditingTextId(null);
+          if (editingTextId) {
+            setEditingTextId(null);
+            onHistoryGestureEnd?.();
+          }
         }}
       >
         {template.showGrid && (
@@ -172,6 +256,18 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
             className="canvas-grid"
             style={{
               backgroundSize: `${gridSizePx}px ${gridSizePx}px`,
+            }}
+          />
+        )}
+        {showMargins && (
+          <div
+            aria-hidden="true"
+            className="canvas-margins"
+            style={{
+              left: `${margins.left * scale}px`,
+              right: `${margins.right * scale}px`,
+              top: `${margins.top * scale}px`,
+              bottom: `${margins.bottom * scale}px`,
             }}
           />
         )}
@@ -185,7 +281,11 @@ export default function LabelCanvas({ template, selectedId, onSelect, onObjectCh
             onMoveStart={startMove}
             onObjectChange={onObjectChange}
             onResizeStart={startResize}
-            onTextEditEnd={() => setEditingTextId(null)}
+            onRotateStart={startRotate}
+            onTextEditEnd={() => {
+              setEditingTextId(null);
+              onHistoryGestureEnd?.();
+            }}
           />
         ))}
       </div>
@@ -201,14 +301,18 @@ function LabelObject({
   onMoveStart,
   onObjectChange,
   onResizeStart,
+  onRotateStart,
   onTextEditEnd,
 }) {
   const lineContainerHeight = getLineContainerHeight(object);
+  const angle = getObjectAngle(object);
   const commonStyle = {
     left: `${object.x * scale}px`,
     top: `${object.y * scale}px`,
     width: `${object.width * scale}px`,
     height: `${(object.type === 'line' ? lineContainerHeight : Math.max(object.height, object.strokeWidth || 0.4)) * scale}px`,
+    transform: angle ? `rotate(${angle}deg)` : undefined,
+    transformOrigin: 'center center',
   };
 
   return (
@@ -250,6 +354,14 @@ function LabelObject({
         <img alt={object.name} className="image-object" draggable={false} src={object.src} />
       )}
       {object.type === 'qr' && <QrObject object={object} />}
+      {selected && !object.locked && (
+        <button
+          aria-label="Rotate object"
+          className="rotate-handle"
+          type="button"
+          onPointerDown={(event) => onRotateStart(event, object)}
+        />
+      )}
       {selected && !object.locked && object.type !== 'line' && (
         <button
           aria-label="Resize object"
@@ -582,4 +694,29 @@ function getLineDashArray(lineStyle, strokeWidth) {
     default:
       return undefined;
   }
+}
+
+function getObjectCenterMm(object) {
+  const height =
+    object.type === 'line'
+      ? getLineContainerHeight(object)
+      : Math.max(Number(object.height) || 0, object.strokeWidth || 0.4);
+
+  return {
+    x: object.x + object.width / 2,
+    y: object.y + height / 2,
+  };
+}
+
+function rotatePointAround(x, y, cx, cy, angleDeg) {
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = x - cx;
+  const dy = y - cy;
+
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  };
 }

@@ -184,6 +184,7 @@ function LibraryItemPreview({ object }) {
         style={{
           width: `${scaledWidth}px`,
           height: `${scaledHeight}px`,
+          transform: object.angle ? `rotate(${object.angle}deg)` : undefined,
         }}
       >
         {renderPreviewObject(object, scale, scaledWidth, scaledHeight)}

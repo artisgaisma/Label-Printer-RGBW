@@ -5,6 +5,54 @@ export const defaultPreset = {
   heightMm: 36,
 };
 
+const lastUsedSizeKey = 'label-printer-last-label-size';
+
+export function loadLastUsedSize() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(lastUsedSizeKey));
+    if (!stored) {
+      return null;
+    }
+
+    const widthMm = Number(stored.widthMm);
+    const heightMm = Number(stored.heightMm);
+    if (!Number.isFinite(widthMm) || !Number.isFinite(heightMm) || widthMm < 5 || heightMm < 5) {
+      return null;
+    }
+
+    return {
+      id: stored.presetId || 'custom',
+      name: stored.name || 'Last used size',
+      widthMm,
+      heightMm,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveLastUsedSize(template) {
+  const widthMm = Number(template?.widthMm);
+  const heightMm = Number(template?.heightMm);
+  if (!Number.isFinite(widthMm) || !Number.isFinite(heightMm) || widthMm < 5 || heightMm < 5) {
+    return;
+  }
+
+  localStorage.setItem(
+    lastUsedSizeKey,
+    JSON.stringify({
+      presetId: template.presetId || 'custom',
+      name: template.name || 'Last used size',
+      widthMm,
+      heightMm,
+    }),
+  );
+}
+
+export function getStartupPreset(presets = []) {
+  return loadLastUsedSize() || presets[0] || defaultPreset;
+}
+
 export async function loadPresets() {
   const response = await fetch('/api/presets');
 

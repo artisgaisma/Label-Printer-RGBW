@@ -373,7 +373,7 @@ label {
 
 .inspector-sidebar {
   align-content: stretch;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   height: calc(100vh - 92px);
   position: sticky;
   top: 76px;
@@ -1033,6 +1033,15 @@ label {
   z-index: 0;
 }
 
+.canvas-margins {
+  border: 1px dashed rgba(37, 99, 235, 0.75);
+  box-shadow: 0 0 0 9999px rgba(37, 99, 235, 0.08);
+  box-sizing: border-box;
+  pointer-events: none;
+  position: absolute;
+  z-index: 0;
+}
+
 .label-object {
   z-index: 1;
 }
@@ -1073,6 +1082,32 @@ label {
   width: 64px;
 }
 
+.margins-controls {
+  display: grid;
+  gap: 6px;
+}
+
+.margins-fields {
+  display: grid;
+  gap: 4px 8px;
+  grid-template-columns: 1fr 1fr;
+}
+
+.margin-field {
+  align-items: center;
+  display: flex;
+  font-size: 0.72rem;
+  font-weight: 700;
+  gap: 6px;
+  justify-content: space-between;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.margin-field input {
+  width: 52px;
+}
+
 .label-object {
   cursor: move;
   position: absolute;
@@ -1086,6 +1121,7 @@ label {
 
 .label-object.locked {
   cursor: default;
+  outline-style: dashed;
 }
 
 .text-object,
@@ -1182,6 +1218,36 @@ label {
   position: absolute;
   right: -9px;
   width: 18px;
+}
+
+.rotate-handle {
+  background: var(--paper);
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  cursor: grab;
+  height: 16px;
+  left: 50%;
+  min-height: 16px;
+  padding: 0;
+  position: absolute;
+  top: -28px;
+  transform: translateX(-50%);
+  width: 16px;
+}
+
+.rotate-handle::after {
+  background: var(--accent);
+  content: '';
+  height: 10px;
+  left: 50%;
+  position: absolute;
+  top: 14px;
+  transform: translateX(-50%);
+  width: 2px;
+}
+
+.rotate-handle:active {
+  cursor: grabbing;
 }
 
 ::-webkit-scrollbar {

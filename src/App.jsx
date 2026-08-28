@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import GridPanel from './components/GridPanel';
+import MarginsPanel from './components/MarginsPanel';
 import LabelCanvas from './components/LabelCanvas';
 import ObjectListPanel from './components/ObjectListPanel';
 import PresetPicker from './components/PresetPicker';
@@ -7,7 +8,15 @@ import PropertyPanel from './components/PropertyPanel';
 import SettingsPage from './components/SettingsPage';
 import TemplatePanel from './components/TemplatePanel';
 import Toolbar from './components/Toolbar';
-import { findPreset, loadPresets, savePreset, savePresets } from './lib/labelPresets';
+import {
+  findPreset,
+  getStartupPreset,
+  loadLastUsedSize,
+  loadPresets,
+  saveLastUsedSize,
+  savePreset,
+  savePresets,
+} from './lib/labelPresets';
 import { clampObjectToLabel, createId, createObject, createTemplate } from './lib/labelModel';
 import {
   defaultLibraryName,
@@ -26,9 +35,19 @@ import {
   readTemplateFile,
   saveTemplate,
 } from './lib/templateStorage';
+import { useTemplateHistory } from './lib/useTemplateHistory';
 
 export default function App() {
-  const [template, setTemplate] = useState(() => createTemplate());
+  const {
+    template,
+    setTemplate,
+    undo,
+    redo,
+    beginGesture,
+    endGesture,
+    canUndo,
+    canRedo,
+  } = useTemplateHistory(() => createTemplate(getStartupPreset()));
   const [selectedId, setSelectedId] = useState(template.objects[0]?.id || null);
   const [templates, setTemplates] = useState(() => loadTemplates());
   const [presets, setPresets] = useState([]);
@@ -36,10 +55,15 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [copiedObject, setCopiedObject] = useState(null);
   const [libraryItems, setLibraryItems] = useState(() => loadLibrary());
+  const [hadStoredSize] = useState(() => Boolean(loadLastUsedSize()));
   const selectedObject = useMemo(
     () => template.objects.find((object) => object.id === selectedId),
     [selectedId, template.objects],
   );
+
+  useEffect(() => {
+    saveLastUsedSize(template);
+  }, [template.heightMm, template.presetId, template.widthMm]);
 
   function updateTemplate(patch) {
     setTemplate((current) => ({
@@ -65,11 +89,11 @@ export default function App() {
     }));
   }
 
-  function toggleObjectLock(id) {
+  function toggleObjectLock(id, locked) {
     setTemplate((current) => ({
       ...current,
       objects: current.objects.map((object) =>
-        object.id === id ? { ...object, locked: !object.locked } : object,
+        object.id === id ? { ...object, locked: Boolean(locked) } : object,
       ),
     }));
   }
@@ -247,9 +271,40 @@ export default function App() {
 
     loadPresets()
       .then((loadedPresets) => {
-        if (!cancelled) {
-          setPresets(loadedPresets);
+        if (cancelled) {
+          return;
         }
+
+        setPresets(loadedPresets);
+
+        // First launch (no saved size): adopt the first preset instead of the
+        // hardcoded default that may not exist in the preset list.
+        if (hadStoredSize || !loadedPresets[0]) {
+          return;
+        }
+
+        const startupPreset = getStartupPreset(loadedPresets);
+        setTemplate((current) => {
+          if (
+            current.presetId === startupPreset.id &&
+            current.widthMm === startupPreset.widthMm &&
+            current.heightMm === startupPreset.heightMm
+          ) {
+            return current;
+          }
+
+          const next = {
+            ...current,
+            presetId: startupPreset.id,
+            widthMm: startupPreset.widthMm,
+            heightMm: startupPreset.heightMm,
+          };
+
+          return {
+            ...next,
+            objects: current.objects.map((object) => clampObjectToLabel(object, next)),
+          };
+        });
       })
       .catch((error) => {
         console.error(error);
@@ -258,10 +313,26 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hadStoredSize, setTemplate]);
 
   useEffect(() => {
     function handleKeyDown(event) {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+        const key = event.key.toLowerCase();
+
+        if (key === 'z' && !event.shiftKey) {
+          event.preventDefault();
+          undo();
+          return;
+        }
+
+        if (key === 'y' || (key === 'z' && event.shiftKey)) {
+          event.preventDefault();
+          redo();
+          return;
+        }
+      }
+
       if (isFormField(event.target)) {
         return;
       }
@@ -291,7 +362,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [copiedObject, selectedId, selectedObject]);
+  }, [copiedObject, selectedId, selectedObject, undo, redo]);
 
   function moveLayer(direction) {
     if (!selectedId) {
@@ -464,6 +535,26 @@ export default function App() {
           />
         </div>
         <div className="header-actions">
+          <button
+            aria-label="Undo"
+            className="icon-button"
+            disabled={!canUndo}
+            title="Undo (Ctrl+Z)"
+            type="button"
+            onClick={undo}
+          >
+            <UndoIcon />
+          </button>
+          <button
+            aria-label="Redo"
+            className="icon-button"
+            disabled={!canRedo}
+            title="Redo (Ctrl+Y)"
+            type="button"
+            onClick={redo}
+          >
+            <RedoIcon />
+          </button>
           <button className="primary" type="button" onClick={() => exportTemplateToPdf(template)}>
             PDF
           </button>
@@ -520,6 +611,8 @@ export default function App() {
           <LabelCanvas
             selectedId={selectedId}
             template={template}
+            onHistoryGestureEnd={endGesture}
+            onHistoryGestureStart={beginGesture}
             onObjectChange={updateObject}
             onSelect={setSelectedId}
           />
@@ -527,6 +620,7 @@ export default function App() {
 
         <aside className="sidebar inspector-sidebar">
           <GridPanel template={template} onTemplateChange={updateTemplate} />
+          <MarginsPanel template={template} onTemplateChange={updateTemplate} />
           <PropertyPanel
             object={selectedObject}
             onMakeImageBlack={handleMakeImageBlack}
@@ -541,7 +635,7 @@ export default function App() {
 }
 
 function hasPositionOrSizeChange(patch) {
-  return ['x', 'y', 'width', 'height'].some((key) => key in patch);
+  return ['x', 'y', 'width', 'height', 'angle'].some((key) => key in patch);
 }
 
 function isFormField(target) {
@@ -601,6 +695,24 @@ function formatCounterValue(value, padWidth) {
   const sign = value < 0 ? '-' : '';
   const digits = String(Math.abs(value)).padStart(padWidth, '0');
   return `${sign}${digits}`;
+}
+
+function UndoIcon() {
+  return (
+    <svg aria-hidden="true" className="button-icon" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
+      <path d="M9 14 4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 1 1 0 11H12" />
+    </svg>
+  );
+}
+
+function RedoIcon() {
+  return (
+    <svg aria-hidden="true" className="button-icon" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
+      <path d="m15 14 5-5-5-5" />
+      <path d="M20 9H9.5a5.5 5.5 0 1 0 0 11H12" />
+    </svg>
+  );
 }
 
 function GearIcon() {

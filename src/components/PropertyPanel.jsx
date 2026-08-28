@@ -44,6 +44,17 @@ export default function PropertyPanel({
                   <NumberField disabled={object.locked} label="H mm" value={object.height} onChange={(value) => onObjectChange({ height: value })} />
                 )}
               </div>
+              <div className="input-row">
+                <NumberField
+                  disabled={object.locked}
+                  label="Angle °"
+                  max={180}
+                  min={-180}
+                  step="1"
+                  value={object.angle ?? 0}
+                  onChange={(value) => onObjectChange({ angle: value })}
+                />
+              </div>
 
           {object.type === 'text' && (
             <>
@@ -348,14 +359,15 @@ function AlignIcon({ align }) {
   );
 }
 
-function NumberField({ label, value, disabled = false, onChange }) {
+function NumberField({ label, value, disabled = false, min = 0, max, step = '0.1', onChange }) {
   return (
     <label>
       {label}
       <input
         disabled={disabled}
-        min="0"
-        step="0.1"
+        max={max}
+        min={min}
+        step={step}
         type="number"
         value={roundValue(value)}
         onChange={(event) => onChange(Number(event.target.value))}

@@ -8,6 +8,7 @@ function createWindow() {
     minWidth: 980,
     minHeight: 680,
     title: 'Label Printer',
+    icon: path.join(__dirname, 'icon.ico'),
     autoHideMenuBar: true,
     webPreferences: {
       contextIsolation: true,

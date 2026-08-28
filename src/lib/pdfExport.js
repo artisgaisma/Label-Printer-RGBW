@@ -1,8 +1,10 @@
 import { jsPDF } from 'jspdf';
 import { getPdfFontFamily } from './fontLibrary';
+import { getObjectAngle } from './labelModel';
 import { qrToDataUrl } from './qrCode';
 
 const textLineHeightFactor = 1.05;
+const ellipseSegments = 64;
 
 export async function buildTemplatePdf(template) {
   const pdf = createPdfForTemplate(template);
@@ -127,16 +129,20 @@ function drawText(pdf, object) {
   const textBlockHeight = Math.max(lines.length, 1) * lineHeight;
   const x = object.x + textOffset(object);
   const y = object.y + Math.max((object.height - textBlockHeight) / 2, 0) + object.fontSize;
+  const angle = getObjectAngle(object);
+  const center = getObjectCenter(object);
+  const anchor = rotatePointAround(x, y, center.x, center.y, angle);
 
-  pdf.text(lines, x, y, {
+  pdf.text(lines, anchor.x, anchor.y, {
     align: object.textAlign || 'left',
+    angle,
     charSpace: object.letterSpacing || 0,
     lineHeightFactor: textLineHeightFactor,
     maxWidth: object.width,
   });
 
   if (object.textDecoration === 'underline') {
-    drawTextUnderline(pdf, object, lines, lineHeight, x, y);
+    drawTextUnderline(pdf, object, lines, lineHeight, x, y, angle, center);
   }
 }
 
@@ -159,7 +165,7 @@ function getPdfFontStyle(object) {
   return 'normal';
 }
 
-function drawTextUnderline(pdf, object, lines, lineHeight, anchorX, startY) {
+function drawTextUnderline(pdf, object, lines, lineHeight, anchorX, startY, angle, center) {
   const underlineOffset = object.fontSize * 0.08;
   pdf.setDrawColor(object.color || '#000000');
   pdf.setLineWidth(Math.max(0.08, object.fontSize * 0.05));
@@ -175,7 +181,9 @@ function drawTextUnderline(pdf, object, lines, lineHeight, anchorX, startY) {
       startX = anchorX - textWidth;
     }
 
-    pdf.line(startX, lineY, startX + textWidth, lineY);
+    const from = rotatePointAround(startX, lineY, center.x, center.y, angle);
+    const to = rotatePointAround(startX + textWidth, lineY, center.x, center.y, angle);
+    pdf.line(from.x, from.y, to.x, to.y);
   });
 }
 
@@ -183,6 +191,7 @@ function drawRect(pdf, object) {
   const fill = object.fill && object.fill !== 'transparent';
   const strokeWidth = object.strokeWidth || 0.2;
   const lineStyle = object.lineStyle || 'solid';
+  const angle = getObjectAngle(object);
   pdf.setLineWidth(strokeWidth);
   pdf.setDrawColor(object.stroke || '#000000');
 
@@ -191,10 +200,10 @@ function drawRect(pdf, object) {
 
     if (fill) {
       pdf.setFillColor(object.fill);
-      drawRectPath(pdf, object, 'F');
+      drawRectPath(pdf, object, 'F', angle);
     }
 
-    drawRectPath(pdf, object, 'S');
+    drawRectPath(pdf, object, 'S', angle);
 
     const inner = {
       x: object.x + strokeWidth + gap,
@@ -202,10 +211,11 @@ function drawRect(pdf, object) {
       width: object.width - 2 * strokeWidth - 2 * gap,
       height: object.height - 2 * strokeWidth - 2 * gap,
       radius: Math.max(0, (object.radius || 0) - strokeWidth - gap),
+      angle: object.angle,
     };
 
     if (inner.width > 0 && inner.height > 0) {
-      drawRectPath(pdf, inner, 'S');
+      drawRectPath(pdf, inner, 'S', angle, getObjectCenter(object));
     }
 
     return;
@@ -216,23 +226,37 @@ function drawRect(pdf, object) {
   }
 
   pdf.setLineDashPattern(getPdfDashPattern(lineStyle, strokeWidth), 0);
-  drawRectPath(pdf, object, fill ? 'FD' : 'S');
+  drawRectPath(pdf, object, fill ? 'FD' : 'S', angle);
   pdf.setLineDashPattern([], 0);
 }
 
-function drawRectPath(pdf, object, mode) {
-  if (object.radius > 0) {
+function drawRectPath(pdf, object, mode, angle = 0, pivot = null) {
+  if (!angle && object.radius > 0) {
     pdf.roundedRect(object.x, object.y, object.width, object.height, object.radius, object.radius, mode);
     return;
   }
 
-  pdf.rect(object.x, object.y, object.width, object.height, mode);
+  if (!angle) {
+    pdf.rect(object.x, object.y, object.width, object.height, mode);
+    return;
+  }
+
+  const center = pivot || getObjectCenter(object);
+  const corners = [
+    { x: object.x, y: object.y },
+    { x: object.x + object.width, y: object.y },
+    { x: object.x + object.width, y: object.y + object.height },
+    { x: object.x, y: object.y + object.height },
+  ].map((point) => rotatePointAround(point.x, point.y, center.x, center.y, angle));
+
+  drawPolygon(pdf, corners, mode);
 }
 
 function drawEllipse(pdf, object) {
   const fill = object.fill && object.fill !== 'transparent';
   const strokeWidth = object.strokeWidth || 0.2;
   const lineStyle = object.lineStyle || 'solid';
+  const angle = getObjectAngle(object);
   pdf.setLineWidth(strokeWidth);
   pdf.setDrawColor(object.stroke || '#000000');
 
@@ -241,28 +265,22 @@ function drawEllipse(pdf, object) {
 
     if (fill) {
       pdf.setFillColor(object.fill);
-      drawEllipsePath(pdf, object, 'F');
+      drawEllipsePath(pdf, object, 'F', angle);
     }
 
-    drawEllipsePath(pdf, object, 'S');
+    drawEllipsePath(pdf, object, 'S', angle);
 
     const inset = strokeWidth + gap + strokeWidth / 2;
     const inner = {
+      x: object.x + inset,
+      y: object.y + inset,
       width: Math.max(object.width - 2 * inset, 0),
       height: Math.max(object.height - 2 * inset, 0),
+      angle: object.angle,
     };
 
     if (inner.width > 0 && inner.height > 0) {
-      drawEllipsePath(
-        pdf,
-        {
-          x: object.x + inset,
-          y: object.y + inset,
-          width: inner.width,
-          height: inner.height,
-        },
-        'S',
-      );
+      drawEllipsePath(pdf, inner, 'S', angle, getObjectCenter(object));
     }
 
     return;
@@ -273,23 +291,48 @@ function drawEllipse(pdf, object) {
   }
 
   pdf.setLineDashPattern(getPdfDashPattern(lineStyle, strokeWidth), 0);
-  drawEllipsePath(pdf, object, fill ? 'FD' : 'S');
+  drawEllipsePath(pdf, object, fill ? 'FD' : 'S', angle);
   pdf.setLineDashPattern([], 0);
 }
 
-function drawEllipsePath(pdf, object, mode) {
-  pdf.ellipse(
-    object.x + object.width / 2,
-    object.y + object.height / 2,
-    object.width / 2,
-    object.height / 2,
-    mode,
-  );
+function drawEllipsePath(pdf, object, mode, angle = 0, pivot = null) {
+  if (!angle) {
+    pdf.ellipse(
+      object.x + object.width / 2,
+      object.y + object.height / 2,
+      object.width / 2,
+      object.height / 2,
+      mode,
+    );
+    return;
+  }
+
+  const center = pivot || getObjectCenter(object);
+  const rx = object.width / 2;
+  const ry = object.height / 2;
+  const localCenter = {
+    x: object.x + rx,
+    y: object.y + ry,
+  };
+  const points = [];
+
+  for (let index = 0; index < ellipseSegments; index += 1) {
+    const theta = (index / ellipseSegments) * Math.PI * 2;
+    const local = {
+      x: localCenter.x + Math.cos(theta) * rx,
+      y: localCenter.y + Math.sin(theta) * ry,
+    };
+    points.push(rotatePointAround(local.x, local.y, center.x, center.y, angle));
+  }
+
+  drawPolygon(pdf, points, mode);
 }
 
 function drawLine(pdf, object) {
   const strokeWidth = object.strokeWidth || 0.2;
   const lineStyle = object.lineStyle || 'solid';
+  const angle = getObjectAngle(object);
+  const center = getObjectCenter(object);
   pdf.setLineWidth(strokeWidth);
   pdf.setDrawColor(object.stroke || '#000000');
 
@@ -305,22 +348,28 @@ function drawLine(pdf, object) {
     if (isHorizontal) {
       const firstY = y1 + strokeWidth / 2;
       const secondY = y1 + strokeWidth / 2 + strokeWidth + gap;
-      pdf.line(x1, firstY, x2, firstY);
-      pdf.line(x1, secondY, x2, secondY);
+      drawSegment(pdf, x1, firstY, x2, firstY, angle, center);
+      drawSegment(pdf, x1, secondY, x2, secondY, angle, center);
       return;
     }
 
     const length = Math.hypot(object.width, object.height) || 1;
     const offsetX = (-object.height / length) * ((strokeWidth + gap) / 2);
     const offsetY = (object.width / length) * ((strokeWidth + gap) / 2);
-    pdf.line(x1 + offsetX, y1 - offsetY, x2 + offsetX, y2 - offsetY);
-    pdf.line(x1 - offsetX, y1 + offsetY, x2 - offsetX, y2 + offsetY);
+    drawSegment(pdf, x1 + offsetX, y1 - offsetY, x2 + offsetX, y2 - offsetY, angle, center);
+    drawSegment(pdf, x1 - offsetX, y1 + offsetY, x2 - offsetX, y2 + offsetY, angle, center);
     return;
   }
 
   pdf.setLineDashPattern(getPdfDashPattern(lineStyle, strokeWidth), 0);
-  pdf.line(x1, y1, x2, y2);
+  drawSegment(pdf, x1, y1, x2, y2, angle, center);
   pdf.setLineDashPattern([], 0);
+}
+
+function drawSegment(pdf, x1, y1, x2, y2, angle, center) {
+  const from = rotatePointAround(x1, y1, center.x, center.y, angle);
+  const to = rotatePointAround(x2, y2, center.x, center.y, angle);
+  pdf.line(from.x, from.y, to.x, to.y);
 }
 
 function getPdfDashPattern(lineStyle, strokeWidth) {
@@ -340,7 +389,8 @@ function getPdfDashPattern(lineStyle, strokeWidth) {
 
 async function drawImage(pdf, object) {
   const pngSrc = await toPngDataUrl(object.src);
-  pdf.addImage(pngSrc, 'PNG', object.x, object.y, object.width, object.height, undefined, 'FAST');
+  const angle = getObjectAngle(object);
+  pdf.addImage(pngSrc, 'PNG', object.x, object.y, object.width, object.height, undefined, 'FAST', angle);
 }
 
 async function drawQrCode(pdf, object) {
@@ -349,7 +399,64 @@ async function drawQrCode(pdf, object) {
     return;
   }
 
-  pdf.addImage(pngSrc, 'PNG', object.x, object.y, object.width, object.height, undefined, 'FAST');
+  const angle = getObjectAngle(object);
+  pdf.addImage(pngSrc, 'PNG', object.x, object.y, object.width, object.height, undefined, 'FAST', angle);
+}
+
+function drawPolygon(pdf, points, mode) {
+  if (points.length < 2) {
+    return;
+  }
+
+  const [first, ...rest] = points;
+  const deltas = rest.map((point, index) => {
+    const previous = index === 0 ? first : rest[index - 1];
+    return [point.x - previous.x, point.y - previous.y];
+  });
+  const last = rest[rest.length - 1] || first;
+  deltas.push([first.x - last.x, first.y - last.y]);
+  pdf.lines(deltas, first.x, first.y, [1, 1], mode, true);
+}
+
+function getObjectCenter(object) {
+  const height = getLineLikeHeight(object);
+
+  return {
+    x: object.x + object.width / 2,
+    y: object.y + height / 2,
+  };
+}
+
+function getLineLikeHeight(object) {
+  if (object.type !== 'line') {
+    return Math.max(Number(object.height) || 0, object.strokeWidth || 0.4);
+  }
+
+  const strokeWidth = object.strokeWidth || 0.4;
+  const isHorizontal = Math.abs(object.height) < 0.01;
+
+  if (object.lineStyle === 'double' && isHorizontal) {
+    return strokeWidth * 2 + (object.doubleGap || 1);
+  }
+
+  return Math.max(Math.abs(object.height), strokeWidth);
+}
+
+function rotatePointAround(x, y, cx, cy, angleDeg) {
+  if (!angleDeg) {
+    return { x, y };
+  }
+
+  const rad = (angleDeg * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+  const dx = x - cx;
+  const dy = y - cy;
+
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos,
+  };
 }
 
 function textOffset(object) {
