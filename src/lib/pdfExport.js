@@ -126,9 +126,8 @@ function drawText(pdf, object) {
   const text = object.text || '';
   const lines = pdf.splitTextToSize(text, object.width);
   const lineHeight = object.fontSize * textLineHeightFactor;
-  const textBlockHeight = Math.max(lines.length, 1) * lineHeight;
   const x = object.x + textOffset(object);
-  const y = object.y + Math.max((object.height - textBlockHeight) / 2, 0) + object.fontSize;
+  const y = object.y + object.fontSize;
   const angle = getObjectAngle(object);
   const center = getObjectCenter(object);
   const anchor = rotatePointAround(x, y, center.x, center.y, angle);

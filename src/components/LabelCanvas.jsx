@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { getFontCssFamily } from '../lib/fontLibrary';
 import { defaultGridSizeMm, normalizeGridSizeMm, snapPositionToGrid, snapValueToGrid } from '../lib/gridUtils';
 import { getObjectAngle, getTemplateMargins } from '../lib/labelModel';
@@ -6,6 +6,7 @@ import { createQrMatrix } from '../lib/qrCode';
 
 const maxCanvasWidth = 760;
 const maxCanvasHeight = 420;
+const minCanvasFitPx = 80;
 const doubleClickDistancePx = 8;
 const doubleClickMs = 450;
 
@@ -18,9 +19,11 @@ export default function LabelCanvas({
   onHistoryGestureEnd,
 }) {
   const canvasRef = useRef(null);
+  const shellRef = useRef(null);
   const dragStateRef = useRef(null);
   const lastTextClickRef = useRef(null);
   const [editingTextId, setEditingTextId] = useState(null);
+  const [fitSize, setFitSize] = useState({ width: maxCanvasWidth, height: maxCanvasHeight });
 
   function setDragState(state) {
     dragStateRef.current = state;
@@ -38,9 +41,33 @@ export default function LabelCanvas({
     setDragState(null);
   }
 
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const stage = shell?.closest('.stage');
+    if (!shell || !stage) {
+      return undefined;
+    }
+
+    function updateFitSize() {
+      setFitSize(measureCanvasFit(stage, shell));
+    }
+
+    const observer = new ResizeObserver(updateFitSize);
+    observer.observe(stage);
+    updateFitSize();
+    return () => observer.disconnect();
+  }, []);
+
   const scale = useMemo(() => {
-    return Math.min(maxCanvasWidth / template.widthMm, maxCanvasHeight / template.heightMm);
-  }, [template.heightMm, template.widthMm]);
+    const widthMm = Math.max(template.widthMm, 1);
+    const heightMm = Math.max(template.heightMm, 1);
+    return Math.min(
+      fitSize.width / widthMm,
+      fitSize.height / heightMm,
+      maxCanvasWidth / widthMm,
+      maxCanvasHeight / heightMm,
+    );
+  }, [fitSize.height, fitSize.width, template.heightMm, template.widthMm]);
 
   const gridSizeMm = normalizeGridSizeMm(template.gridSizeMm ?? defaultGridSizeMm);
   const gridSizePx = gridSizeMm * scale;
@@ -224,7 +251,7 @@ export default function LabelCanvas({
   }
 
   return (
-    <div className="canvas-shell">
+    <div ref={shellRef} className="canvas-shell">
       <div className="canvas-meta">
         {template.widthMm} x {template.heightMm} mm
       </div>
@@ -656,6 +683,21 @@ function LineObject({ object, scale }) {
       />
     </svg>
   );
+}
+
+function measureCanvasFit(stage, shell) {
+  const stageStyles = getComputedStyle(stage);
+  const padX = parseFloat(stageStyles.paddingLeft) + parseFloat(stageStyles.paddingRight);
+  const padY = parseFloat(stageStyles.paddingTop) + parseFloat(stageStyles.paddingBottom);
+  const shellStyles = getComputedStyle(shell);
+  const gap = parseFloat(shellStyles.rowGap || shellStyles.gap) || 0;
+  const meta = shell.querySelector('.canvas-meta');
+  const metaHeight = meta ? meta.getBoundingClientRect().height + gap : 0;
+
+  return {
+    width: Math.max(minCanvasFitPx, stage.clientWidth - padX),
+    height: Math.max(minCanvasFitPx, stage.clientHeight - padY - metaHeight),
+  };
 }
 
 function getLineContainerHeight(object) {

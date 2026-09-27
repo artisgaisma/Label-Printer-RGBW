@@ -12,15 +12,16 @@ export default function TemplatePanel({
   const [expanded, setExpanded] = useState(false);
   const importInputRef = useRef(null);
 
-  function handleTemplateSelect(event) {
-    const value = event.target.value;
-    if (value === '__import_json__') {
-      setSelectedTemplateName('');
-      importInputRef.current?.click();
-      return;
-    }
+  function handleImportJson() {
+    setSelectedTemplateName('');
+    importInputRef.current?.click();
+  }
 
-    setSelectedTemplateName(value);
+  async function handleSaveTemplate() {
+    const name = await onSave();
+    if (name) {
+      setSelectedTemplateName(name);
+    }
   }
 
   function handleAddTemplate() {
@@ -56,21 +57,27 @@ export default function TemplatePanel({
         <section className="panel template-dropdown">
           <h2>Templates & Export</h2>
           <div className="template-select-row">
+            <button className="template-import-option" type="button" onClick={handleImportJson}>
+              Import JSON...
+            </button>
             {templates.length === 0 ? (
-              <select value={selectedTemplateName} onChange={handleTemplateSelect}>
-                <option value="">Choose template</option>
-                <option value="__import_json__">Import JSON...</option>
-              </select>
+              <p className="template-library-empty">No saved templates in this browser yet. Click Save to keep this design.</p>
             ) : (
-              <select value={selectedTemplateName} onChange={handleTemplateSelect}>
-                <option value="">Choose template</option>
-                <option value="__import_json__">Import JSON...</option>
+              <ul className="template-library-list">
                 {templates.map((savedTemplate) => (
-                  <option key={`${savedTemplate.name}-${savedTemplate.savedAt}`} value={savedTemplate.name}>
-                    {savedTemplate.name}
-                  </option>
+                  <li key={`${savedTemplate.name}-${savedTemplate.savedAt}`}>
+                    <button
+                      className={`template-library-item ${
+                        selectedTemplateName === savedTemplate.name ? 'active' : ''
+                      }`}
+                      type="button"
+                      onClick={() => setSelectedTemplateName(savedTemplate.name)}
+                    >
+                      {savedTemplate.name}
+                    </button>
+                  </li>
                 ))}
-              </select>
+              </ul>
             )}
             <input ref={importInputRef} accept="application/json,.json" hidden type="file" onChange={onImportJson} />
           </div>
@@ -78,7 +85,7 @@ export default function TemplatePanel({
             <button disabled={!selectedTemplateName} type="button" onClick={handleAddTemplate}>
               Add
             </button>
-            <button className="secondary" type="button" onClick={onSave}>
+            <button className="secondary" type="button" onClick={handleSaveTemplate}>
               Save
             </button>
             <button className="danger" disabled={!selectedTemplateName} type="button" onClick={handleDeleteTemplate}>
@@ -106,4 +113,3 @@ function DownloadIcon() {
     </svg>
   );
 }
-

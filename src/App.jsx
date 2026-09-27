@@ -437,7 +437,7 @@ export default function App() {
   function handleSaveTemplate() {
     const name = window.prompt('Label name', template.name || 'Untitled label')?.trim();
     if (!name) {
-      return;
+      return '';
     }
 
     const namedTemplate = {
@@ -445,8 +445,14 @@ export default function App() {
       name,
     };
 
-    setTemplate(namedTemplate);
-    setTemplates(saveTemplate(namedTemplate));
+    try {
+      setTemplate(namedTemplate);
+      setTemplates(saveTemplate(namedTemplate));
+      return name;
+    } catch (error) {
+      window.alert(error.message || 'Unable to save template.');
+      return '';
+    }
   }
 
   function handleLoadTemplate(name) {

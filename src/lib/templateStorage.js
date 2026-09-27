@@ -19,7 +19,12 @@ export function saveTemplate(template) {
     ...templates.filter((item) => item.name !== template.name),
   ].slice(0, 30);
 
-  localStorage.setItem(storageKey, JSON.stringify(nextTemplates));
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(nextTemplates));
+  } catch {
+    throw new Error('Unable to save template in the browser. The label may be too large — download JSON instead.');
+  }
+
   return nextTemplates;
 }
 

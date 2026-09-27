@@ -299,7 +299,42 @@ label {
 
 .template-select-row {
   display: grid;
+  gap: 8px;
   grid-template-columns: 1fr;
+}
+
+.template-import-option {
+  justify-content: flex-start;
+  text-transform: none;
+}
+
+.template-library-empty {
+  color: var(--muted);
+  font-size: 0.76rem;
+  margin: 0;
+}
+
+.template-library-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 0;
+}
+
+.template-library-item {
+  justify-content: flex-start;
+  min-height: 28px;
+  padding: 5px 8px;
+  text-transform: none;
+  width: 100%;
+}
+
+.template-library-item.active {
+  background: rgba(196, 92, 38, 0.18);
+  border-color: var(--accent);
 }
 
 .preset-manager-backdrop {
@@ -360,7 +395,8 @@ label {
 .workspace {
   display: grid;
   gap: 12px;
-  grid-template-columns: 286px minmax(420px, 1fr) 304px;
+  grid-template-columns: 286px minmax(0, 1fr) 304px;
+  isolation: isolate;
   margin: 0 auto;
   max-width: 1500px;
 }
@@ -369,6 +405,8 @@ label {
   display: grid;
   gap: 10px;
   align-content: start;
+  position: relative;
+  z-index: 2;
 }
 
 .inspector-sidebar {
@@ -987,13 +1025,20 @@ label {
   display: flex;
   justify-content: center;
   min-height: 560px;
+  min-width: 0;
+  overflow: hidden;
   padding: 26px;
+  position: relative;
+  z-index: 0;
 }
 
 .canvas-shell {
   display: grid;
   gap: 10px;
   justify-items: center;
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
 }
 
 .canvas-meta {
@@ -1133,7 +1178,7 @@ label {
 }
 
 .text-object {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   height: 100%;
   overflow: hidden;
